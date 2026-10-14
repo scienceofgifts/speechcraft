@@ -66,11 +66,11 @@ SpeechCraft Studio supports deploying the static frontend (to Cloudflare Pages o
    ```
 3. Set your Gemini API key secret in Cloudflare:
    ```bash
-   wrangler secret put GEMINI_API_KEY
+   npx wrangler secret put GEMINI_API_KEY --config worker/wrangler.toml
    ```
 4. Deploy the worker (`worker/index.ts`):
    ```bash
-   wrangler deploy
+   npx wrangler deploy --config worker/wrangler.toml
    ```
    Note your worker URL (e.g. `https://speechcraft-worker.yourname.workers.dev`).
 
