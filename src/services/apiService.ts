@@ -182,6 +182,130 @@ export async function submitConversationTurn(
   }
 }
 
+export function normalizeDetailedWordLesson(raw: any, fallbackItem?: Partial<VocabularyCatalogueItem>): DetailedWordLesson {
+  const word = raw?.word || fallbackItem?.word || 'Word';
+  const id = raw?.id || fallbackItem?.id || `lesson-${word.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
+  // definitions: WordSense[]
+  let definitions = Array.isArray(raw?.definitions) ? raw.definitions : [];
+  if (definitions.length === 0) {
+    const defText = raw?.definition || fallbackItem?.definition || 'Detailed definition.';
+    definitions = [
+      {
+        definition: defText,
+        isPrimary: true,
+        contextNote: raw?.nuanceAndUsage || 'General usage',
+        example: Array.isArray(raw?.examples) && raw.examples[0]
+          ? (typeof raw.examples[0] === 'string' ? raw.examples[0] : raw.examples[0].sentence || '')
+          : `Usage example for "${word}".`,
+      },
+    ];
+  }
+
+  // synonyms: SynonymDetail[]
+  let synonyms = Array.isArray(raw?.synonyms) ? raw.synonyms : [];
+  if (synonyms.length === 0 && Array.isArray(raw?.synonymsAndContrasts)) {
+    synonyms = raw.synonymsAndContrasts.map((s: any) => ({
+      word: typeof s === 'string' ? s : String(s),
+      nuance: 'Near synonym or contextual equivalent.',
+    }));
+  }
+
+  // antonyms: string[]
+  const antonyms = Array.isArray(raw?.antonyms) ? raw.antonyms : [];
+
+  // distinctions: WordDistinction[]
+  const distinctions = Array.isArray(raw?.distinctions) ? raw.distinctions : [];
+
+  // collocations: object with arrays
+  const collocations = {
+    verbs: Array.isArray(raw?.collocations?.verbs)
+      ? raw.collocations.verbs
+      : (Array.isArray(raw?.collocations) ? raw.collocations : []),
+    modifiers: Array.isArray(raw?.collocations?.modifiers) ? raw.collocations.modifiers : [],
+    prepositions: Array.isArray(raw?.collocations?.prepositions) ? raw.collocations.prepositions : [],
+    idiomaticFrames: Array.isArray(raw?.collocations?.idiomaticFrames) ? raw.collocations.idiomaticFrames : [],
+    contrasts: Array.isArray(raw?.collocations?.contrasts) ? raw.collocations.contrasts : [],
+  };
+
+  // morphology: object with baseRoot and forms[]
+  const morphology = {
+    baseRoot: raw?.morphology?.baseRoot || raw?.etymology?.rootName || word,
+    forms: Array.isArray(raw?.morphology?.forms) ? raw.morphology.forms : [],
+  };
+
+  // memoryAids: MemoryAid[]
+  const memoryAids = Array.isArray(raw?.memoryAids) ? raw.memoryAids : [
+    {
+      technique: 'semantic-hook' as const,
+      explanation: raw?.americanPronunciationTip || `Associate "${word}" with its primary context.`,
+      isEtymological: false,
+    },
+  ];
+
+  // practicalExamples: PracticalExample[]
+  let practicalExamples = Array.isArray(raw?.practicalExamples) ? raw.practicalExamples : [];
+  if (practicalExamples.length === 0 && Array.isArray(raw?.examples)) {
+    practicalExamples = raw.examples.map((ex: any) => ({
+      domain: 'Everyday Intellectual' as const,
+      sentence: typeof ex === 'string' ? ex : (ex?.sentence || String(ex)),
+    }));
+  }
+
+  // selfCheck: SelfCheckQuestion
+  const selfCheck = raw?.selfCheck && typeof raw.selfCheck === 'object' && Array.isArray(raw.selfCheck.options)
+    ? raw.selfCheck
+    : {
+        id: `quiz-${id}`,
+        prompt: `Which sentence uses "${word}" most accurately?`,
+        options: [
+          `A context that naturally demonstrates the meaning of ${word}.`,
+          `An irrelevant usage that does not match the definition.`,
+          `An incorrect usage contradicting the meaning.`,
+          `A casual slang misapplication.`,
+        ],
+        correctIndex: 0,
+        explanation: `Demonstrates the accurate primary definition of "${word}".`,
+        type: 'context-choice' as const,
+      };
+
+  // etymology: object
+  const etymology = {
+    languageOfOrigin: raw?.etymology?.languageOfOrigin || 'English / Classical roots',
+    historicalDevelopment: raw?.etymology?.historicalDevelopment || 'Historical progression through classical and modern usage.',
+    rootId: raw?.etymology?.rootId || fallbackItem?.rootId || 'none',
+    rootName: raw?.etymology?.rootName || word,
+    literalOriginalMeaning: raw?.etymology?.literalOriginalMeaning || fallbackItem?.definition || 'Core lexical meaning',
+    modernConnection: raw?.etymology?.modernConnection || 'Applied in modern analytical, professional, and intellectual contexts.',
+    disputedOrUncertain: raw?.etymology?.disputedOrUncertain,
+  };
+
+  return {
+    id,
+    word,
+    partOfSpeech: raw?.partOfSpeech || fallbackItem?.partOfSpeech || 'word',
+    syllables: raw?.syllables || word,
+    phoneticIpa: raw?.phoneticIpa || raw?.phonetic || '/.../',
+    stressPattern: raw?.stressPattern || 'Standard stress',
+    difficulty: raw?.difficulty || fallbackItem?.difficulty || 'Advanced',
+    register: raw?.register || 'Intellectual & Professional',
+    frequency: raw?.frequency || 'Contemporary English usage',
+    shortGloss: raw?.shortGloss || fallbackItem?.definition || 'Core definition',
+    definitions,
+    etymology,
+    synonyms,
+    antonyms,
+    distinctions,
+    collocations,
+    morphology,
+    memoryAids,
+    practicalExamples,
+    selfCheck,
+    cluster: raw?.cluster || 'General Lexicon',
+    tags: Array.isArray(raw?.tags) ? raw.tags : (fallbackItem?.topicTags || []),
+  };
+}
+
 export async function generateVocabLesson(
   item: VocabularyCatalogueItem,
   selectedModel?: string
@@ -224,7 +348,8 @@ export async function generateVocabLesson(
       throw new Error(errMessage);
     }
 
-    return await parseJsonResponse<DetailedWordLesson>(response);
+    const rawLesson = await parseJsonResponse<any>(response);
+    return normalizeDetailedWordLesson(rawLesson, item);
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {

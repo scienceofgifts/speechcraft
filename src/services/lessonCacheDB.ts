@@ -1,4 +1,5 @@
 import { DetailedWordLesson } from '../types/speech';
+import { normalizeDetailedWordLesson } from './apiService';
 
 const DB_NAME = 'speechcraft_lessons_cache_v1';
 const STORE_NAME = 'generated_lessons';
@@ -54,7 +55,7 @@ class LessonCacheDB {
         };
       });
 
-      if (lessonFromIdb) return lessonFromIdb;
+      if (lessonFromIdb) return normalizeDetailedWordLesson(lessonFromIdb);
     } catch {
       // Fall through to localStorage
     }
@@ -63,7 +64,7 @@ class LessonCacheDB {
       const raw = localStorage.getItem(LOCALSTORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        return parsed[id] || null;
+        return parsed[id] ? normalizeDetailedWordLesson(parsed[id]) : null;
       }
     } catch {
       // Ignored
@@ -80,7 +81,9 @@ class LessonCacheDB {
       const raw = localStorage.getItem(LOCALSTORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        Object.assign(result, parsed);
+        for (const [k, v] of Object.entries(parsed)) {
+          if (v) result[k] = normalizeDetailedWordLesson(v);
+        }
       }
     } catch {
       // Ignored
@@ -104,7 +107,7 @@ class LessonCacheDB {
 
       idbLessons.forEach((lesson) => {
         if (lesson && lesson.id) {
-          result[lesson.id] = lesson;
+          result[lesson.id] = normalizeDetailedWordLesson(lesson);
         }
       });
     } catch {
