@@ -1,19 +1,8 @@
 import { GoogleGenAI, Type } from '@google/genai';
+import { resolveApiModelId, DEFAULT_GEMINI_MODEL_ID } from '../src/config/modelConfig';
 
 export interface Env {
   GEMINI_API_KEY: string;
-}
-
-function resolveApiModelId(requestedModel?: string): string {
-  if (!requestedModel) return 'gemini-3.5-flash-lite';
-  const clean = requestedModel.toLowerCase();
-  if (clean.includes('3.8')) return 'gemini-3.8-flash';
-  if (clean.includes('3.7')) return 'gemini-3.7-flash';
-  if (clean.includes('3.6')) return 'gemini-3.6-flash';
-  if (clean.includes('3.5') && clean.includes('pro')) return 'gemini-3.5-pro';
-  if (clean.includes('3.5')) return 'gemini-3.5-flash';
-  if (clean.includes('3.1')) return 'gemini-3.1-flash-lite';
-  return 'gemini-3.5-flash-lite';
 }
 
 export default {
@@ -49,7 +38,8 @@ export default {
       }
 
       const body: any = await request.json().catch(() => ({}));
-      const modelName = resolveApiModelId(body.selectedGeminiModel || body.selectedModel || body.model);
+      const requestedModel = body.selectedGeminiModel || body.selectedModel || body.model || DEFAULT_GEMINI_MODEL_ID;
+      const modelName = resolveApiModelId(requestedModel);
 
       if (path === '/api/analyze-speech') {
         const { audioBase64, mimeType = 'audio/webm', exerciseType = 'general', targetText = '', context = '', learnerGoals = [], targetAccent = 'General American English' } = body;
