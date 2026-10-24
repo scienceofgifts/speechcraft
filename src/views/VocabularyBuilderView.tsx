@@ -32,7 +32,7 @@ import {
   toggleStarWord,
 } from '../services/vocabBuilderStorage';
 import { referenceSpeaker } from '../services/ttsService';
-import { lessonCacheDB } from '../services/lessonCacheDB';
+import { lessonCacheDB, getAllVocabularyLessons, getVocabularyLesson, saveVocabularyLesson } from '../services/lessonCacheDB';
 import { WordLessonModal } from '../components/WordLessonModal';
 import { CatalogueWordModal } from '../components/CatalogueWordModal';
 import { WordRootExplorer } from '../components/WordRootExplorer';
@@ -56,9 +56,13 @@ export const VocabularyBuilderView: React.FC<VocabularyBuilderViewProps> = ({ pr
 
   // Load saved AI generated lessons from IndexedDB / storage
   useEffect(() => {
-    lessonCacheDB.getAll().then((saved) => {
+    console.log('[VocabularyBuilderView] Initializing: Loading all lessons from IndexedDB...');
+    getAllVocabularyLessons().then((saved) => {
       if (saved) {
+        console.log(`[VocabularyBuilderView] Successfully loaded ${Object.keys(saved).length} lessons from cache.`);
         setGeneratedLessons(saved);
+      } else {
+        console.log('[VocabularyBuilderView] No lessons found in cache.');
       }
     });
   }, []);
@@ -97,11 +101,18 @@ export const VocabularyBuilderView: React.FC<VocabularyBuilderViewProps> = ({ pr
   };
 
   // Open item helper: routes to Detailed Lesson Modal if available, or Catalogue Word Modal
-  const handleOpenItem = (item: VocabularyCatalogueItem) => {
+  const handleOpenItem = async (item: VocabularyCatalogueItem) => {
     markWordExplored(item.id);
     refreshProgress();
 
-    const lesson = DETAILED_WORD_LESSONS.find((l) => l.id === item.id) || generatedLessons[item.id];
+    let lesson: DetailedWordLesson | null = DETAILED_WORD_LESSONS.find((l) => l.id === item.id) || generatedLessons[item.id] || null;
+    if (!lesson) {
+      lesson = await getVocabularyLesson(item.id);
+      if (lesson) {
+        setGeneratedLessons((prev) => ({ ...prev, [lesson!.id]: lesson! }));
+      }
+    }
+
     if (lesson) {
       setSelectedLesson(lesson);
       setIsLessonModalOpen(true);
@@ -111,14 +122,22 @@ export const VocabularyBuilderView: React.FC<VocabularyBuilderViewProps> = ({ pr
     }
   };
 
-  const handleOpenWordById = (wordId: string) => {
+  const handleOpenWordById = async (wordId: string) => {
     const item = VOCABULARY_CATALOGUE.find((c) => c.id === wordId);
     if (item) {
       handleOpenItem(item);
     } else {
       // Fallback search by headword
       const itemByHeadword = VOCABULARY_CATALOGUE.find((c) => c.word.toLowerCase() === wordId.toLowerCase());
-      if (itemByHeadword) handleOpenItem(itemByHeadword);
+      if (itemByHeadword) {
+        handleOpenItem(itemByHeadword);
+      } else {
+        const cached = await getVocabularyLesson(wordId);
+        if (cached) {
+          setSelectedLesson(cached);
+          setIsLessonModalOpen(true);
+        }
+      }
     }
   };
 
@@ -626,7 +645,7 @@ export const VocabularyBuilderView: React.FC<VocabularyBuilderViewProps> = ({ pr
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0">
-                          {(item.hasDetailedLesson || !!generatedLessons[item.id]) && (
+                          {item.hasDetailedLesson ? (
                             <span
                               className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1"
                               title="Complete 7-tab detailed lesson available"
@@ -634,7 +653,15 @@ export const VocabularyBuilderView: React.FC<VocabularyBuilderViewProps> = ({ pr
                               <Sparkles className="w-2.5 h-2.5 text-amber-400" />
                               <span>Lesson</span>
                             </span>
-                          )}
+                          ) : !!generatedLessons[item.id] ? (
+                            <span
+                              className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-teal-500/20 text-teal-300 border border-teal-500/30 flex items-center gap-1"
+                              title="AI Lesson saved in your local database"
+                            >
+                              <CheckCircle2 className="w-2.5 h-2.5 text-teal-400" />
+                              <span>Saved</span>
+                            </span>
+                          ) : null}
                           <button
                             type="button"
                             onClick={(e) => handleToggleStar(e, item.id)}
@@ -838,13 +865,32 @@ export const VocabularyBuilderView: React.FC<VocabularyBuilderViewProps> = ({ pr
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <h4 className="text-lg font-bold text-slate-100 font-serif">{item.word}</h4>
-                      <button
-                        type="button"
-                        onClick={(e) => handleToggleStar(e, item.id)}
-                        className="text-amber-400 p-1"
-                      >
-                        <Star className="w-4 h-4 fill-amber-400" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {item.hasDetailedLesson ? (
+                          <span
+                            className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1"
+                            title="Complete 7-tab detailed lesson available"
+                          >
+                            <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                            <span>Lesson</span>
+                          </span>
+                        ) : !!generatedLessons[item.id] ? (
+                          <span
+                            className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-teal-500/20 text-teal-300 border border-teal-500/30 flex items-center gap-1"
+                            title="AI Lesson saved in your local database"
+                          >
+                            <CheckCircle2 className="w-2.5 h-2.5 text-teal-400" />
+                            <span>Saved</span>
+                          </span>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleStar(e, item.id)}
+                          className="text-amber-400 p-1"
+                        >
+                          <Star className="w-4 h-4 fill-amber-400" />
+                        </button>
+                      </div>
                     </div>
                     <p className="text-xs text-slate-300 line-clamp-2">{item.definition}</p>
                   </div>
@@ -888,6 +934,7 @@ export const VocabularyBuilderView: React.FC<VocabularyBuilderViewProps> = ({ pr
           setActiveSubTab('roots');
         }}
         onLessonGenerated={(newLesson) => {
+          saveVocabularyLesson(newLesson);
           setGeneratedLessons((prev) => ({ ...prev, [newLesson.id]: newLesson }));
           setSelectedLesson(newLesson);
           setIsLessonModalOpen(true);

@@ -30,20 +30,22 @@ export const DailySessionModal: React.FC<DailySessionModalProps> = ({
   plan,
   onPlanUpdate,
 }) => {
+  const exercises = plan?.exercises || [];
+
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(() => {
     // Resume from first incomplete step
-    const firstIncomplete = plan.exercises.findIndex((e) => !e.completed);
+    const firstIncomplete = (plan?.exercises || []).findIndex((e) => !e.completed);
     return firstIncomplete >= 0 ? firstIncomplete : 0;
   });
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [stepAnalysis, setStepAnalysis] = useState<SpeechAnalysisResult | null>(null);
   const [isPlayingModel, setIsPlayingModel] = useState(false);
-  const [sessionFinished, setSessionFinished] = useState<boolean>(() => plan.isFinished);
+  const [sessionFinished, setSessionFinished] = useState<boolean>(() => !!plan?.isFinished);
 
-  if (!isOpen) return null;
+  if (!isOpen || exercises.length === 0) return null;
 
-  const currentExercise = plan.exercises[currentStepIndex];
+  const currentExercise = exercises[currentStepIndex] || exercises[0];
 
   const handlePlayModel = () => {
     if (!currentExercise?.targetText) return;
@@ -84,11 +86,13 @@ export const DailySessionModal: React.FC<DailySessionModalProps> = ({
       });
 
       // Mark this exercise completed in plan
-      const updatedExercises = [...plan.exercises];
-      updatedExercises[currentStepIndex] = {
-        ...updatedExercises[currentStepIndex],
-        completed: true,
-      };
+      const updatedExercises = [...exercises];
+      if (updatedExercises[currentStepIndex]) {
+        updatedExercises[currentStepIndex] = {
+          ...updatedExercises[currentStepIndex],
+          completed: true,
+        };
+      }
 
       const completedCount = updatedExercises.filter((e) => e.completed).length;
       const isFinished = completedCount === updatedExercises.length;
@@ -115,7 +119,7 @@ export const DailySessionModal: React.FC<DailySessionModalProps> = ({
 
   const handleNextStep = () => {
     setStepAnalysis(null);
-    if (currentStepIndex < plan.exercises.length - 1) {
+    if (currentStepIndex < exercises.length - 1) {
       setCurrentStepIndex((prev) => prev + 1);
     } else {
       setSessionFinished(true);
@@ -124,7 +128,7 @@ export const DailySessionModal: React.FC<DailySessionModalProps> = ({
 
   const handleSkipStep = () => {
     setStepAnalysis(null);
-    if (currentStepIndex < plan.exercises.length - 1) {
+    if (currentStepIndex < exercises.length - 1) {
       setCurrentStepIndex((prev) => prev + 1);
     } else {
       setSessionFinished(true);
@@ -146,16 +150,16 @@ export const DailySessionModal: React.FC<DailySessionModalProps> = ({
         <div className="pb-4 border-b border-slate-800 mb-6">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-teal-400">
             <Clock className="w-3.5 h-3.5" />
-            <span>Today’s {plan.totalDurationMinutes}-Minute Coaching Routine</span>
+            <span>Today’s {plan?.totalDurationMinutes || 18}-Minute Coaching Routine</span>
           </div>
           <h2 className="text-xl font-bold text-slate-100 mt-1">
-            {sessionFinished ? 'Daily Routine Completed!' : `Step ${currentStepIndex + 1} of ${plan.exercises.length}: ${currentExercise?.title}`}
+            {sessionFinished ? 'Daily Routine Completed!' : `Step ${currentStepIndex + 1} of ${exercises.length}: ${currentExercise?.title || ''}`}
           </h2>
         </div>
 
         {/* Step Progress Pills */}
         <div className="grid grid-cols-5 gap-2 mb-6">
-          {plan.exercises.map((step, idx) => (
+          {exercises.map((step, idx) => (
             <button
               key={step.id}
               onClick={() => {
@@ -248,7 +252,7 @@ export const DailySessionModal: React.FC<DailySessionModalProps> = ({
                     <Sparkles className="w-4 h-4" /> Step Coaching Review
                   </span>
                   <span className="text-xs font-mono text-slate-400">
-                    Pace: {stepAnalysis.metrics.estimatedWpm} WPM • Fillers: {stepAnalysis.metrics.fillerCount}
+                    Pace: {stepAnalysis.metrics?.estimatedWpm ?? 130} WPM • Fillers: {stepAnalysis.metrics?.fillerCount ?? 0}
                   </span>
                 </div>
 
@@ -256,7 +260,7 @@ export const DailySessionModal: React.FC<DailySessionModalProps> = ({
                   {stepAnalysis.summary}
                 </p>
 
-                {stepAnalysis.findings.length > 0 && (
+                {stepAnalysis.findings && stepAnalysis.findings.length > 0 && (
                   <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 space-y-1">
                     <span className="font-semibold text-teal-300">Target Focus: </span>
                     {stepAnalysis.findings[0]?.suggestedCorrection}

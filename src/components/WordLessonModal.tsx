@@ -432,7 +432,7 @@ export const WordLessonModal: React.FC<WordLessonModalProps> = ({
                   <Lightbulb className="w-4 h-4 text-amber-400" /> Pedagogical Memory Aids & Mnemonics
                 </h4>
                 <div className="space-y-2">
-                  {lesson.memoryAids.map((aid, idx) => (
+                  {(lesson.memoryAids || []).map((aid, idx) => (
                     <div
                       key={idx}
                       className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-xs flex items-start gap-2.5"
@@ -465,7 +465,7 @@ export const WordLessonModal: React.FC<WordLessonModalProps> = ({
               </div>
 
               <div className="space-y-4">
-                {lesson.distinctions.map((dist, idx) => (
+                {(lesson.distinctions || []).map((dist, idx) => (
                   <div
                     key={idx}
                     className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-4"
@@ -525,7 +525,7 @@ export const WordLessonModal: React.FC<WordLessonModalProps> = ({
                       Common Verbs That Pair:
                     </span>
                     <div className="flex flex-wrap gap-1.5">
-                      {lesson.collocations.verbs.map((v, i) => (
+                      {(lesson.collocations?.verbs || []).map((v, i) => (
                         <span key={i} className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-mono">
                           {v}
                         </span>
@@ -538,7 +538,7 @@ export const WordLessonModal: React.FC<WordLessonModalProps> = ({
                       Typical Modifiers:
                     </span>
                     <div className="flex flex-wrap gap-1.5">
-                      {lesson.collocations.modifiers.map((m, i) => (
+                      {(lesson.collocations?.modifiers || []).map((m, i) => (
                         <span key={i} className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-mono">
                           {m}
                         </span>
@@ -552,7 +552,7 @@ export const WordLessonModal: React.FC<WordLessonModalProps> = ({
                     Idiomatic Frames & Phrases:
                   </span>
                   <div className="flex flex-wrap gap-2">
-                    {lesson.collocations.idiomaticFrames.map((frame, i) => (
+                    {(lesson.collocations?.idiomaticFrames || []).map((frame, i) => (
                       <span key={i} className="px-3 py-1.5 rounded-xl bg-teal-950/30 border border-teal-800/40 text-xs text-teal-200">
                         "{frame}"
                       </span>
@@ -567,7 +567,7 @@ export const WordLessonModal: React.FC<WordLessonModalProps> = ({
                   Natural vs Awkward Usage Contrasts
                 </h4>
                 <div className="space-y-2">
-                  {lesson.collocations.contrasts.map((c, i) => (
+                  {(lesson.collocations?.contrasts || []).map((c, i) => (
                     <div
                       key={i}
                       className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs"
@@ -606,7 +606,7 @@ export const WordLessonModal: React.FC<WordLessonModalProps> = ({
               </div>
 
               <div className="space-y-3">
-                {lesson.morphology.forms.map((form, idx) => (
+                {(lesson.morphology?.forms || []).map((form, idx) => (
                   <div
                     key={idx}
                     className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2"
@@ -644,7 +644,7 @@ export const WordLessonModal: React.FC<WordLessonModalProps> = ({
               </div>
 
               <div className="space-y-3">
-                {lesson.practicalExamples.map((ex, idx) => (
+                {(lesson.practicalExamples || []).map((ex, idx) => (
                   <div
                     key={idx}
                     className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5"
@@ -689,7 +689,7 @@ export const WordLessonModal: React.FC<WordLessonModalProps> = ({
                 </p>
 
                 <div className="space-y-2.5 pt-1">
-                  {lesson.selfCheck.options.map((opt, idx) => {
+                  {(lesson.selfCheck?.options || []).map((opt, idx) => {
                     const isSelected = selectedQuizOption === idx;
                     const isCorrect = idx === lesson.selfCheck.correctIndex;
                     let btnStyle = 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700';

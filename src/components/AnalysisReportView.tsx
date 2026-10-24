@@ -41,7 +41,8 @@ export const AnalysisReportView: React.FC<AnalysisReportViewProps> = ({
     );
   };
 
-  const filteredFindings = findings.filter(
+  const safeFindings = Array.isArray(findings) ? findings : [];
+  const filteredFindings = safeFindings.filter(
     (f) => activeTab === 'all' || f.category.toLowerCase() === activeTab
   );
 

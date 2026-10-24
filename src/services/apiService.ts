@@ -1,6 +1,7 @@
 import { SpeechAnalysisResult, VocabularyCatalogueItem, DetailedWordLesson, ExpandedRootItem, WordFamilyItem } from '../types/speech';
 import { FlirtingLesson } from '../data/flirtingStudioData';
 import { getStoredProfile } from './storage';
+import { saveVocabularyLesson } from './db';
 
 export interface AnalyzeOptions {
   audioBase64: string;
@@ -14,8 +15,43 @@ export interface AnalyzeOptions {
   selectedGeminiModel?: string;
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+const API_BASE_URL = ((import.meta as any).env?.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 const getApiUrl = (endpoint: string) => `${API_BASE_URL}${endpoint}`;
+
+// Helper to extract clean human-readable error messages from nested or stringified JSON errors
+export function extractErrorMessage(errData: any, defaultMsg: string): string {
+  if (!errData) return defaultMsg;
+  if (typeof errData === 'string') {
+    try {
+      const parsed = JSON.parse(errData);
+      return extractErrorMessage(parsed, defaultMsg);
+    } catch {
+      return errData;
+    }
+  }
+  if (typeof errData.error === 'string') {
+    try {
+      const trimmed = errData.error.trim();
+      if (trimmed.startsWith('{')) {
+        const parsed = JSON.parse(trimmed);
+        return extractErrorMessage(parsed, defaultMsg);
+      }
+    } catch {
+      // ignore
+    }
+    return errData.error;
+  }
+  if (errData.error?.message && typeof errData.error.message === 'string') {
+    return errData.error.message;
+  }
+  if (typeof errData.message === 'string') {
+    return errData.message;
+  }
+  if (typeof errData.details === 'string') {
+    return errData.details;
+  }
+  return defaultMsg;
+}
 
 // Helper to safely extract JSON or handle non-JSON responses gracefully
 async function parseJsonResponse<T>(response: Response): Promise<T> {
@@ -56,7 +92,7 @@ export async function analyzeSpeech(options: AnalyzeOptions): Promise<SpeechAnal
       let errMessage = `Speech analysis failed (HTTP ${response.status})`;
       try {
         const errData = await parseJsonResponse<any>(response);
-        errMessage = errData.error || errData.details || errMessage;
+        errMessage = extractErrorMessage(errData, errMessage);
       } catch (parseErr: any) {
         if (parseErr.message.includes('HTML page')) {
           errMessage = parseErr.message;
@@ -66,7 +102,39 @@ export async function analyzeSpeech(options: AnalyzeOptions): Promise<SpeechAnal
     }
 
     const result = await parseJsonResponse<SpeechAnalysisResult>(response);
-    return result;
+
+    const rawFindings = Array.isArray(result?.findings) ? result.findings : [];
+    const fallbackFindings = (result as any)?.actionableFeedback && Array.isArray((result as any).actionableFeedback)
+      ? (result as any).actionableFeedback.map((fb: any) => ({
+          category: (fb.category || 'fluency').toLowerCase(),
+          issue: fb.observation || 'Speech observation',
+          evidence: fb.observation || '',
+          explanation: fb.observation || '',
+          suggestedCorrection: fb.remedy || '',
+          targetedExercise: fb.remedy || 'Practice repetition',
+          confidence: 'high' as const,
+        }))
+      : [];
+
+    return {
+      ...result,
+      transcript: result?.transcript || '',
+      summary: result?.summary || 'Speech analysis complete.',
+      metrics: {
+        estimatedWpm: result?.metrics?.estimatedWpm ?? 130,
+        fillerCount: result?.metrics?.fillerCount ?? 0,
+        detectedFillers: Array.isArray(result?.metrics?.detectedFillers) ? result.metrics.detectedFillers : [],
+        clarityScore: result?.metrics?.clarityScore ?? 80,
+        pronunciationScore: result?.metrics?.pronunciationScore ?? 80,
+        pacingScore: result?.metrics?.pacingScore ?? 80,
+        fluencyScore: result?.metrics?.fluencyScore ?? 80,
+      },
+      findings: rawFindings.length > 0 ? rawFindings : fallbackFindings,
+      strengths: Array.isArray(result?.strengths) ? result.strengths : [],
+      priorityAreas: Array.isArray(result?.priorityAreas) ? result.priorityAreas : [],
+      nextExercises: Array.isArray(result?.nextExercises) ? result.nextExercises : [],
+      limitations: Array.isArray(result?.limitations) ? result.limitations : [],
+    };
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
@@ -156,7 +224,7 @@ export async function submitConversationTurn(
       let errMessage = `Conversation round failed (HTTP ${response.status})`;
       try {
         const errData = await parseJsonResponse<any>(response);
-        errMessage = errData.error || errData.details || errMessage;
+        errMessage = extractErrorMessage(errData, errMessage);
       } catch (parseErr: any) {
         if (parseErr.message.includes('HTML page')) {
           errMessage = parseErr.message;
@@ -339,7 +407,7 @@ export async function generateVocabLesson(
       let errMessage = `Lesson generation failed (HTTP ${response.status})`;
       try {
         const errData = await parseJsonResponse<any>(response);
-        errMessage = errData.error || errData.details || errMessage;
+        errMessage = extractErrorMessage(errData, errMessage);
       } catch (parseErr: any) {
         if (parseErr.message.includes('HTML page')) {
           errMessage = parseErr.message;
@@ -349,7 +417,9 @@ export async function generateVocabLesson(
     }
 
     const rawLesson = await parseJsonResponse<any>(response);
-    return normalizeDetailedWordLesson(rawLesson, item);
+    const lesson = normalizeDetailedWordLesson(rawLesson, item);
+    await saveVocabularyLesson(lesson);
+    return lesson;
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
@@ -388,7 +458,7 @@ export async function generateRootEnrichment(
       let errMessage = `Root enrichment generation failed (HTTP ${response.status})`;
       try {
         const errData = await parseJsonResponse<any>(response);
-        errMessage = errData.error || errData.details || errMessage;
+        errMessage = extractErrorMessage(errData, errMessage);
       } catch {
         // Fallback
       }
@@ -431,7 +501,7 @@ export async function generateFamilyEnrichment(
       let errMessage = `Word family enrichment generation failed (HTTP ${response.status})`;
       try {
         const errData = await parseJsonResponse<any>(response);
-        errMessage = errData.error || errData.details || errMessage;
+        errMessage = extractErrorMessage(errData, errMessage);
       } catch {
         // Fallback
       }
@@ -493,7 +563,7 @@ export async function generateComplimentCollection(options: {
       let errMessage = `Compliment collection generation failed (HTTP ${response.status})`;
       try {
         const errData = await parseJsonResponse<any>(response);
-        errMessage = errData.error || errData.details || errMessage;
+        errMessage = extractErrorMessage(errData, errMessage);
       } catch {
         // Fallback
       }
@@ -514,6 +584,7 @@ export async function generateCurriculumLessons(options: {
   categoryId?: string;
   categoryName?: string;
   count?: number;
+  topic?: string;
   selectedGeminiModel?: string;
 }): Promise<FlirtingLesson[]> {
   const controller = new AbortController();
@@ -538,15 +609,23 @@ export async function generateCurriculumLessons(options: {
       let errMessage = `Curriculum generation failed (HTTP ${response.status})`;
       try {
         const errData = await parseJsonResponse<any>(response);
-        errMessage = errData.error || errData.details || errMessage;
+        errMessage = extractErrorMessage(errData, errMessage);
       } catch {
         // Fallback
       }
       throw new Error(errMessage);
     }
 
-    const data = await parseJsonResponse<{ lessons: FlirtingLesson[] }>(response);
-    return data.lessons || [];
+    const data = await parseJsonResponse<any>(response);
+    let lessons: FlirtingLesson[] = [];
+    if (Array.isArray(data)) {
+      lessons = data;
+    } else if (data && Array.isArray(data.lessons)) {
+      lessons = data.lessons;
+    } else if (data && Array.isArray(data.data)) {
+      lessons = data.data;
+    }
+    return lessons;
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {

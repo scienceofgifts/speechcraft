@@ -27,6 +27,8 @@ import {
   Download,
   Copy,
   Mic,
+  Trash2,
+  AlertCircle,
 } from 'lucide-react';
 import {
   FLIRTING_CATEGORIES,
@@ -84,9 +86,17 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
       const saved = localStorage.getItem('speechcraft_flirting_lessons');
       if (saved) {
         const parsed = JSON.parse(saved);
-        const existingIds = new Set([...FLIRTING_LESSONS, ...EDGY_ADULT_LESSONS].map((l) => l.id));
-        const customLessons = parsed.filter((l: FlirtingLesson) => !existingIds.has(l.id));
-        return [...customLessons, ...FLIRTING_LESSONS, ...EDGY_ADULT_LESSONS];
+        if (Array.isArray(parsed)) {
+          const existingIds = new Set([...FLIRTING_LESSONS, ...EDGY_ADULT_LESSONS].map((l) => l.id));
+          const customLessons = parsed
+            .filter((l: any) => l && typeof l === 'object')
+            .map((l: any, idx: number) => ({
+              ...l,
+              id: l.id && String(l.id).trim() ? String(l.id).trim() : `custom-lesson-${idx}`,
+            }))
+            .filter((l: FlirtingLesson) => !existingIds.has(l.id));
+          return [...customLessons, ...FLIRTING_LESSONS, ...EDGY_ADULT_LESSONS];
+        }
       }
     } catch {}
     return [...FLIRTING_LESSONS, ...EDGY_ADULT_LESSONS];
@@ -102,6 +112,9 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
   });
   const [isGeneratingLessons, setIsGeneratingLessons] = useState(false);
   const [curriculumGenError, setCurriculumGenError] = useState<string | null>(null);
+  const [curriculumGenSuccess, setCurriculumGenSuccess] = useState<string | null>(null);
+  const [deletingLessonId, setDeletingLessonId] = useState<string | null>(null);
+  const [regeneratingLessonId, setRegeneratingLessonId] = useState<string | null>(null);
 
   // Recording & Analysis state for curriculum
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -146,7 +159,7 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
   // Persistence useEffect hooks
   useEffect(() => {
     try {
-      const defaultIds = new Set(FLIRTING_LESSONS.map((l) => l.id));
+      const defaultIds = new Set([...FLIRTING_LESSONS, ...EDGY_ADULT_LESSONS].map((l) => l.id));
       const customLessons = allLessons.filter((l) => !defaultIds.has(l.id));
       localStorage.setItem('speechcraft_flirting_lessons', JSON.stringify(customLessons));
     } catch (e) {
@@ -243,9 +256,35 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
     ]);
   };
 
+  const isCustomOrAiLesson = (lesson: FlirtingLesson) => {
+    const defaultIds = new Set([...FLIRTING_LESSONS, ...EDGY_ADULT_LESSONS].map((l) => l.id));
+    return (
+      !defaultIds.has(lesson.id) ||
+      lesson.id.startsWith('ai-lesson-') ||
+      lesson.id.startsWith('custom-lesson-') ||
+      !lesson.title ||
+      !lesson.phrase ||
+      lesson.title === 'string'
+    );
+  };
+
+  const isValidLesson = (l: any): boolean => {
+    return (
+      l &&
+      typeof l === 'object' &&
+      typeof l.title === 'string' &&
+      l.title.trim().length > 0 &&
+      l.title.trim().toLowerCase() !== 'string' &&
+      typeof l.phrase === 'string' &&
+      l.phrase.trim().length > 0 &&
+      l.phrase.trim().toLowerCase() !== 'string'
+    );
+  };
+
   const handleGenerateCurriculum = async () => {
     setIsGeneratingLessons(true);
     setCurriculumGenError(null);
+    setCurriculumGenSuccess(null);
     try {
       const activeCatObj = FLIRTING_CATEGORIES.find((c) => c.id === selectedCategory) || FLIRTING_CATEGORIES[0];
       const catId = selectedCategory === 'all' ? 'banter' : selectedCategory;
@@ -256,15 +295,96 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
         categoryName: catName,
         count: 4,
       });
-      if (newLessons && newLessons.length > 0) {
-        setAllLessons((prev) => [...newLessons, ...prev]);
-        setSelectedLesson(newLessons[0]);
+
+      const validLessons = (newLessons || []).filter(isValidLesson);
+
+      if (validLessons.length > 0) {
+        const timestamp = Date.now();
+        const sanitized: FlirtingLesson[] = validLessons.map((l, i) => ({
+          ...l,
+          id: l.id && l.id !== 'string' ? `${l.id}-${timestamp}-${i}` : `ai-lesson-${timestamp}-${i}`,
+          categoryId: selectedCategory === 'all' ? (l.categoryId || catId) : selectedCategory,
+          categoryName: l.categoryName || catName,
+        }));
+
+        setAllLessons((prev) => [...sanitized, ...prev]);
+        setSelectedLesson(sanitized[0]);
+        if (searchQuery) setSearchQuery('');
+        setCurriculumGenSuccess(`Generated ${sanitized.length} new AI lessons for ${catName}!`);
+        setTimeout(() => setCurriculumGenSuccess(null), 5000);
+      } else {
+        setCurriculumGenError('The AI returned no valid lessons. Please try again.');
       }
     } catch (e: any) {
       console.error(e);
       setCurriculumGenError(e.message || 'Failed to generate curriculum lessons.');
     } finally {
       setIsGeneratingLessons(false);
+    }
+  };
+
+  const handleDeleteLesson = (lessonId: string) => {
+    setAllLessons((prev) => prev.filter((l) => l.id !== lessonId));
+    setSavedLessonIds((prev) => prev.filter((id) => id !== lessonId));
+    if (selectedLesson?.id === lessonId) {
+      const remaining = allLessons.filter((l) => l.id !== lessonId);
+      setSelectedLesson(remaining.length > 0 ? remaining[0] : null);
+      setAnalysisResult(null);
+      setLastAudioUrl(null);
+    }
+    setDeletingLessonId(null);
+    setCurriculumGenSuccess('Lesson removed from collection.');
+    setTimeout(() => setCurriculumGenSuccess(null), 3500);
+  };
+
+  const handleRegenerateLesson = async (lesson: FlirtingLesson) => {
+    setRegeneratingLessonId(lesson.id);
+    setCurriculumGenError(null);
+    setCurriculumGenSuccess(null);
+    try {
+      const activeCatObj = FLIRTING_CATEGORIES.find((c) => c.id === lesson.categoryId) || FLIRTING_CATEGORIES[0];
+      const catId = lesson.categoryId || (selectedCategory === 'all' ? 'banter' : selectedCategory);
+      const catName = lesson.categoryName || activeCatObj.label;
+      const topic = lesson.title && lesson.title !== 'string'
+        ? `${lesson.title}: ${lesson.phrase || ''}`
+        : catName;
+
+      const response = await generateCurriculumLessons({
+        categoryId: catId,
+        categoryName: catName,
+        count: 1,
+        topic,
+      });
+
+      const validOnes = (response || []).filter(isValidLesson);
+      if (validOnes.length > 0) {
+        const timestamp = Date.now();
+        const replacement: FlirtingLesson = {
+          ...validOnes[0],
+          id: `ai-lesson-${timestamp}-${Math.random().toString(36).substring(2, 6)}`,
+          categoryId: catId,
+          categoryName: catName,
+        };
+
+        setAllLessons((prev) => prev.map((l) => (l.id === lesson.id ? replacement : l)));
+        if (selectedLesson?.id === lesson.id) {
+          setSelectedLesson(replacement);
+          setAnalysisResult(null);
+          setLastAudioUrl(null);
+        }
+        if (savedLessonIds.includes(lesson.id)) {
+          setSavedLessonIds((prev) => prev.map((id) => (id === lesson.id ? replacement.id : id)));
+        }
+        setCurriculumGenSuccess(`Lesson "${replacement.title}" regenerated successfully!`);
+        setTimeout(() => setCurriculumGenSuccess(null), 4000);
+      } else {
+        setCurriculumGenError('Could not generate a valid replacement. The existing lesson was retained.');
+      }
+    } catch (e: any) {
+      console.error(e);
+      setCurriculumGenError(e.message || 'Failed to regenerate lesson. Retained previous version.');
+    } finally {
+      setRegeneratingLessonId(null);
     }
   };
 
@@ -582,6 +702,7 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
           <div className="w-full max-w-full min-w-0">
             <div className="flex items-center gap-2 overflow-x-auto pb-2 pt-0.5 min-w-0 w-full max-w-full no-scrollbar scrollbar-none touch-pan-x px-0.5 scroll-smooth whitespace-nowrap flex-nowrap">
               <button
+                key="cat-all"
                 onClick={() => setSelectedCategory('all')}
                 className={`px-4 py-2.5 rounded-2xl text-xs font-semibold shrink-0 whitespace-nowrap border transition-all ${
                   selectedCategory === 'all'
@@ -635,9 +756,33 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
             </div>
           </div>
 
+          {curriculumGenSuccess && (
+            <div className="p-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 text-xs text-emerald-300 flex items-center justify-between shadow-md">
+              <div className="flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{curriculumGenSuccess}</span>
+              </div>
+              <button
+                onClick={() => setCurriculumGenSuccess(null)}
+                className="text-emerald-400 hover:text-emerald-200 text-xs font-semibold px-2 py-0.5 rounded-lg hover:bg-emerald-900/40 transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {curriculumGenError && (
-            <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/40 text-xs text-red-300">
-              {curriculumGenError}
+            <div className="p-3.5 rounded-2xl bg-rose-950/60 border border-rose-500/40 text-xs text-rose-300 flex items-center justify-between shadow-md">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{curriculumGenError}</span>
+              </div>
+              <button
+                onClick={() => setCurriculumGenError(null)}
+                className="text-rose-400 hover:text-rose-200 text-xs font-semibold px-2 py-0.5 rounded-lg hover:bg-rose-900/40 transition-colors"
+              >
+                Dismiss
+              </button>
             </div>
           )}
 
@@ -657,12 +802,17 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Lessons List (1 col) */}
             <div className="space-y-3 lg:col-span-1 max-h-[700px] overflow-y-auto pr-1">
-              {filteredLessons.map((lesson) => {
+              {filteredLessons.map((lesson, idx) => {
                 const isSelected = selectedLesson?.id === lesson.id;
                 const isSaved = savedLessonIds.includes(lesson.id);
+                const isAiOrCustom = isCustomOrAiLesson(lesson);
+                const isMalformed = !lesson.title || !lesson.phrase || lesson.title === 'string';
+                const isRegenerating = regeneratingLessonId === lesson.id;
+                const isConfirmingDelete = deletingLessonId === lesson.id;
+
                 return (
                   <div
-                    key={lesson.id}
+                    key={lesson.id ? `flirting-lesson-${lesson.id}-${idx}` : `flirting-lesson-idx-${idx}`}
                     onClick={() => {
                       setSelectedLesson(lesson);
                       setAnalysisResult(null);
@@ -675,33 +825,107 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
                     }`}
                   >
                     <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">
-                          {lesson.tone}
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-400">{lesson.intimacyLevel}</span>
+                      <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">
+                            {lesson.tone || 'Playful'}
+                          </span>
+                          {isAiOrCustom && (
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-300 bg-indigo-500/20 px-1.5 py-0.5 rounded border border-indigo-500/30">
+                              AI Lesson
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-400">{lesson.intimacyLevel || 'Casual'}</span>
                       </div>
-                      <h3 className="text-sm font-bold text-slate-100">{lesson.title}</h3>
-                      <p className="text-xs text-slate-400 italic mt-1 line-clamp-1">"{lesson.phrase}"</p>
+
+                      {isMalformed ? (
+                        <div>
+                          <h3 className="text-sm font-bold text-amber-300 italic">
+                            {lesson.title && lesson.title !== 'string' ? lesson.title : '[Incomplete Lesson Card]'}
+                          </h3>
+                          <p className="text-xs text-amber-400/80 italic mt-1 line-clamp-1">
+                            {lesson.phrase && lesson.phrase !== 'string' ? `"${lesson.phrase}"` : 'Missing phrase data — Click delete or regenerate'}
+                          </p>
+                        </div>
+                      ) : (
+                        <div>
+                          <h3 className="text-sm font-bold text-slate-100">{lesson.title}</h3>
+                          <p className="text-xs text-slate-400 italic mt-1 line-clamp-1">"{lesson.phrase}"</p>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between pt-2 border-t border-slate-800/60">
-                      <span className="text-[11px] text-slate-400">{lesson.categoryName}</span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleSaveLesson(lesson.id);
-                        }}
-                        className="text-slate-400 hover:text-rose-400 transition-colors"
-                      >
-                        {isSaved ? <BookmarkCheck className="w-4 h-4 fill-rose-400 text-rose-400" /> : <Bookmark className="w-4 h-4" />}
-                      </button>
+                      <span className="text-[11px] text-slate-400 truncate max-w-[120px]">{lesson.categoryName || 'Curriculum'}</span>
+                      <div className="flex items-center gap-1.5">
+                        {isAiOrCustom && (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRegenerateLesson(lesson);
+                              }}
+                              disabled={isRegenerating}
+                              title="Regenerate this AI lesson"
+                              className="p-1 rounded-lg text-slate-400 hover:text-indigo-300 hover:bg-indigo-950/40 transition-colors disabled:opacity-50"
+                            >
+                              <RotateCcw className={`w-3.5 h-3.5 ${isRegenerating ? 'animate-spin text-indigo-400' : ''}`} />
+                            </button>
+
+                            {isConfirmingDelete ? (
+                              <div className="flex items-center gap-1 bg-rose-950/90 border border-rose-500/50 rounded-lg px-2 py-0.5 text-[10px]">
+                                <span className="text-rose-200">Delete?</span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteLesson(lesson.id);
+                                  }}
+                                  className="text-rose-400 font-bold hover:text-rose-300 underline"
+                                >
+                                  Yes
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeletingLessonId(null);
+                                  }}
+                                  className="text-slate-400 hover:text-slate-200 ml-1"
+                                >
+                                  No
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeletingLessonId(lesson.id);
+                                }}
+                                title="Delete this lesson"
+                                className="p-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSaveLesson(lesson.id);
+                          }}
+                          className="p-1 text-slate-400 hover:text-rose-400 transition-colors"
+                          title={isSaved ? "Remove from saved" : "Save lesson"}
+                        >
+                          {isSaved ? <BookmarkCheck className="w-4 h-4 fill-rose-400 text-rose-400" /> : <Bookmark className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
               })}
               {filteredLessons.length === 0 && (
-                <div className="text-center py-12 text-slate-500 text-xs">
+                <div key="empty-filtered-lessons" className="text-center py-12 text-slate-500 text-xs">
                   No expressions found matching your search.
                 </div>
               )}
@@ -714,24 +938,73 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
                   {/* Header info */}
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <span className="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/20">
                           {selectedLesson.categoryName}
                         </span>
+                        {isCustomOrAiLesson(selectedLesson) && (
+                          <span className="text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                            AI Generated
+                          </span>
+                        )}
                         <span className="text-xs font-mono text-slate-400">{selectedLesson.intimacyLevel}</span>
                       </div>
                       <h2 className="text-xl md:text-2xl font-bold text-slate-100">{selectedLesson.title}</h2>
                     </div>
-                    <button
-                      onClick={() => toggleSaveLesson(selectedLesson.id)}
-                      className="p-2.5 rounded-2xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 border border-slate-700 transition-all"
-                    >
-                      {savedLessonIds.includes(selectedLesson.id) ? (
-                        <BookmarkCheck className="w-5 h-5 fill-rose-400 text-rose-400" />
-                      ) : (
-                        <Bookmark className="w-5 h-5" />
+
+                    <div className="flex items-center gap-2">
+                      {isCustomOrAiLesson(selectedLesson) && (
+                        <>
+                          <button
+                            onClick={() => handleRegenerateLesson(selectedLesson)}
+                            disabled={regeneratingLessonId === selectedLesson.id}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition-all disabled:opacity-50"
+                            title="Regenerate this AI lesson with a fresh version"
+                          >
+                            <RotateCcw className={`w-3.5 h-3.5 ${regeneratingLessonId === selectedLesson.id ? 'animate-spin' : ''}`} />
+                            <span>{regeneratingLessonId === selectedLesson.id ? 'Regenerating...' : 'Regenerate'}</span>
+                          </button>
+
+                          {deletingLessonId === selectedLesson.id ? (
+                            <div className="flex items-center gap-2 bg-rose-950/80 border border-rose-500/50 rounded-2xl px-3 py-2 text-xs">
+                              <span className="text-rose-200">Delete card?</span>
+                              <button
+                                onClick={() => handleDeleteLesson(selectedLesson.id)}
+                                className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs"
+                              >
+                                Yes
+                              </button>
+                              <button
+                                onClick={() => setDeletingLessonId(null)}
+                                className="text-slate-400 hover:text-slate-200 text-xs"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setDeletingLessonId(selectedLesson.id)}
+                              className="p-2.5 rounded-2xl bg-slate-800/80 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-500/40 transition-all"
+                              title="Delete this lesson card"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </>
                       )}
-                    </button>
+
+                      <button
+                        onClick={() => toggleSaveLesson(selectedLesson.id)}
+                        className="p-2.5 rounded-2xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 border border-slate-700 transition-all"
+                        title={savedLessonIds.includes(selectedLesson.id) ? "Remove from saved" : "Save lesson"}
+                      >
+                        {savedLessonIds.includes(selectedLesson.id) ? (
+                          <BookmarkCheck className="w-5 h-5 fill-rose-400 text-rose-400" />
+                        ) : (
+                          <Bookmark className="w-5 h-5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   {/* Phrase Box */}
@@ -955,10 +1228,10 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {complimentCollectionData.compliments.map((comp) => {
+                  {complimentCollectionData.compliments.map((comp, idx) => {
                     const isSaved = savedAiCompliments.some((s) => s.id === comp.id);
                     return (
-                      <div key={comp.id} className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 flex flex-col justify-between shadow-md">
+                      <div key={comp.id ? `comp-${comp.id}-${idx}` : `comp-idx-${idx}`} className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 flex flex-col justify-between shadow-md">
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-300 bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
@@ -1013,8 +1286,8 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
                 <ShieldCheck className="w-4 h-4 text-indigo-400" /> Artful Subtlety & Nuance
               </h3>
               <div className="space-y-4">
-                {SUBTLETY_TECHNIQUES.map((tech) => (
-                  <div key={tech.id} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5">
+                {SUBTLETY_TECHNIQUES.map((tech, idx) => (
+                  <div key={tech.id ? `tech-${tech.id}-${idx}` : `tech-${idx}`} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-bold text-indigo-300">{tech.title}</h4>
                       <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-300 px-2 py-0.5 rounded-full">
@@ -1037,8 +1310,8 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
                 <BookOpen className="w-4 h-4 text-rose-400" /> Compliment Construction Formulas
               </h3>
               <div className="space-y-4">
-                {CONSTRUCTION_PATTERNS.map((pat) => (
-                  <div key={pat.id} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+                {CONSTRUCTION_PATTERNS.map((pat, idx) => (
+                  <div key={pat.id ? `pat-${pat.id}-${idx}` : `pat-${idx}`} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
                     <h4 className="text-sm font-bold text-rose-300">{pat.name}</h4>
                     <div className="p-2.5 rounded-xl bg-slate-900 font-mono text-xs text-rose-200 border border-slate-800">
                       {pat.structure}
@@ -1157,11 +1430,11 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
 
             {/* Scenario Pills */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
-              {FLIRTING_SCENARIOS.map((scen) => {
+              {FLIRTING_SCENARIOS.map((scen, idx) => {
                 const isSelected = currentScenario.id === scen.id;
                 return (
                   <div
-                    key={scen.id}
+                    key={scen.id ? `scen-${scen.id}-${idx}` : `scen-${idx}`}
                     onClick={() => setCurrentScenario(scen)}
                     className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-2 ${
                       isSelected
@@ -1226,11 +1499,11 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
 
             {/* Conversation Log */}
             <div className="space-y-4 max-h-[450px] overflow-y-auto pr-2">
-              {turns.map((turn) => {
+              {turns.map((turn, idx) => {
                 const isCoach = turn.role === 'coach';
                 return (
                   <div
-                    key={turn.id}
+                    key={turn.id ? `turn-${turn.id}-${idx}` : `turn-${idx}`}
                     className={`flex items-start gap-3 ${isCoach ? '' : 'flex-row-reverse'}`}
                   >
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isCoach ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'}`}>
@@ -1243,8 +1516,8 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
                       {turn.feedback && turn.feedback.length > 0 && (
                         <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-1">
                           <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 block">Coach Insights</span>
-                          {turn.feedback.map((fb: string, idx: number) => (
-                            <p key={idx} className="text-[11px] text-slate-300">• {fb}</p>
+                          {turn.feedback.map((fb: string, fIdx: number) => (
+                            <p key={`fb-${fIdx}`} className="text-[11px] text-slate-300">• {fb}</p>
                           ))}
                         </div>
                       )}
@@ -1254,7 +1527,7 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
               })}
 
               {isProcessingTurn && (
-                <div className="flex items-center gap-3 animate-pulse">
+                <div key="turn-processing-indicator" className="flex items-center gap-3 animate-pulse">
                   <div className="w-8 h-8 rounded-full bg-rose-500/20 text-rose-300 flex items-center justify-center border border-rose-500/30">
                     <Bot className="w-4 h-4" />
                   </div>
@@ -1318,9 +1591,9 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {allLessons.filter((l) => savedLessonIds.includes(l.id)).map((lesson) => (
+              {allLessons.filter((l) => savedLessonIds.includes(l.id)).map((lesson, idx) => (
                 <div
-                  key={lesson.id}
+                  key={lesson.id ? `saved-lesson-${lesson.id}-${idx}` : `saved-lesson-idx-${idx}`}
                   className="p-5 rounded-2xl bg-slate-950 border border-slate-800/80 space-y-3 flex flex-col justify-between"
                 >
                   <div className="space-y-2">
@@ -1360,7 +1633,7 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
               ))}
 
               {savedLessonIds.length === 0 && (
-                <div className="col-span-full py-6 text-center text-slate-500 text-xs">
+                <div key="empty-saved-lessons" className="col-span-full py-6 text-center text-slate-500 text-xs">
                   No saved curriculum expressions yet. Click the bookmark icon on any lesson to save it here.
                 </div>
               )}
@@ -1375,8 +1648,8 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {savedAiCompliments.map((comp) => (
-                  <div key={comp.id} className="p-5 rounded-2xl bg-slate-950 border border-slate-800/80 space-y-3 flex flex-col justify-between">
+                {savedAiCompliments.map((comp, idx) => (
+                  <div key={comp.id ? `saved-comp-${comp.id}-${idx}` : `saved-comp-idx-${idx}`} className="p-5 rounded-2xl bg-slate-950 border border-slate-800/80 space-y-3 flex flex-col justify-between">
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
@@ -1411,7 +1684,7 @@ export const FlirtingStudioView: React.FC<FlirtingStudioViewProps> = ({ profile 
                 ))}
 
                 {savedAiCompliments.length === 0 && (
-                  <div className="col-span-full py-8 text-center text-slate-500 text-xs">
+                  <div key="empty-saved-compliments" className="col-span-full py-8 text-center text-slate-500 text-xs">
                     No saved AI compliments yet. Generate a collection in Compliment Craft & AI and save your favorite expressions.
                   </div>
                 )}
