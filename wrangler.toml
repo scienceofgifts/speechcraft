@@ -7,3 +7,7 @@ directory = "dist"
 
 [vars]
 GEMINI_API_KEY = ""
+
+# ...
+[vars]
+# ...
